@@ -1,0 +1,8 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.DS_Store
+# local checkouts and saved variables used by tools/export_data.py
+/QuestieDB/
+/OpenXP.lua
