@@ -1,7 +1,7 @@
 /** Who the route is for, and what that character can pick up and use. */
 import type { DataIndex, Faction, Item, Side } from "./data";
 
-export type Style = "fast" | "balanced" | "complete";
+export type Style = "fast" | "balanced" | "relaxed" | "complete";
 
 export interface Character {
   faction: Faction;
@@ -15,7 +15,14 @@ export interface Character {
   dungeons: boolean;
   /** Include elite (group) quests when picking quests automatically. */
   groups: boolean;
+  /** Professions the character trains: their quests join the route. */
+  professions: string[];
+  /** Include WoW Forever's camping quests. */
+  camping: boolean;
 }
+
+export const PRIMARY_PROFESSIONS = ["Alchemy", "Blacksmithing", "Enchanting", "Engineering", "Herbalism", "Leatherworking", "Mining", "Skinning", "Tailoring"];
+export const SECONDARY_PROFESSIONS = ["Cooking", "First Aid", "Fishing"];
 
 export const RACES: Record<Faction, string[]> = {
   A: ["Human", "Dwarf", "Night Elf", "Gnome", "Skyborne"],
@@ -24,12 +31,13 @@ export const RACES: Record<Faction, string[]> = {
 export const CLASSES = ["Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid"];
 
 export const STYLES: Record<Style, { label: string; about: string }> = {
-  fast: { label: "Fast", about: "Only quests that pay well for the time. Skips long collection quests and far-away turn-ins." },
-  balanced: { label: "Balanced", about: "Every quest that is worth XP at your level." },
-  complete: { label: "Everything", about: "Every quest you can pick up, even ones that are low level for you." },
+  fast: { label: "Speed leveling", about: "Only quests that pay well for the time. Skips long collection quests and anything green." },
+  balanced: { label: "Efficient", about: "Every quest that is worth its XP at your level, in the best zones." },
+  relaxed: { label: "Relaxed", about: "Easy quests close to your level, and a longer stay in each zone. Nothing that needs a group." },
+  complete: { label: "Completionist", about: "Every quest you can pick up, even ones that are low level for you." },
 };
 
-export const DEFAULT_CHARACTER: Character = { faction: "A", race: "Human", cls: "Warrior", level: 1, hardcore: false, style: "balanced", dungeons: false, groups: false };
+export const DEFAULT_CHARACTER: Character = { faction: "A", race: "Human", cls: "Warrior", level: 1, hardcore: false, style: "balanced", dungeons: false, groups: false, professions: [], camping: true };
 
 /** The race as quest data names it. */
 export function questRace(c: Character): string {

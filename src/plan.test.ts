@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { Book, countInText } from "./book";
 import { DEFAULT_CHARACTER, canUse, type Character } from "./character";
-import type { DataIndex, QuestRow, ZoneData } from "./data";
+import type { DataIndex, GoalData, QuestRow, ZoneData } from "./data";
+import { chaptersToSections, generateRoute } from "./generate";
 import { readAction } from "./guide";
 import { pickQuests, planRoute, removeQuest, suggestZones } from "./planner";
 import { simulate } from "./sim";
@@ -109,4 +110,37 @@ describe("a route over several zones", () => {
     const horde = suggestZones(book, { ...DEFAULT_CHARACTER, faction: "H", race: "Orc" }, 11, new Set()).map((s) => s.zone.name);
     expect(horde.slice(0, 3)).toContain("The Barrens");
   });
+});
+
+describe("generating a whole route", () => {
+  const goals = load<GoalData>("goals.json");
+  const open = async (zone: number) => load<ZoneData>(`zones/${zone}.json`);
+
+  it("takes a new character to the target level and works the wishes in", async () => {
+    const c = { ...DEFAULT_CHARACTER, professions: ["Cooking"] };
+    const recipe = goals.recipes.find((r) => r.profession === "Cooking" && r.vendors?.some((v) => v.friendly !== "H"))!;
+    const { chapters, report } = await generateRoute(c, { target: 30, dungeons: [zoneId("The Deadmines")], items: [211527], recipes: [recipe.id] }, goals, index, rows, open, () => undefined);
+    expect(report.reached).toBeGreaterThanOrEqual(30);
+    expect(chapters[0]!.name).toBe("Elwynn Forest");
+    expect(chapters.some((ch) => ch.kind === "dungeon" && ch.name === "The Deadmines")).toBe(true);
+    expect(report.included.join(" ")).toContain(recipe.name);
+    const sections = chaptersToSections(chapters, c).map((s) => s.guide.steps);
+    const sim = simulate(sections, c, new Book(rows, index.zones, await Promise.all([...new Set(chapters.map((ch) => ch.zone!))].map(open))));
+    expect(sim.problems.filter((p) => p.severity === "error").map((p) => p.text)).toEqual([]);
+  }, 60000);
+
+  it.each([
+    ["Alliance, efficient", { ...DEFAULT_CHARACTER }],
+    ["Horde, relaxed hardcore", { ...DEFAULT_CHARACTER, faction: "H" as const, race: "Orc", cls: "Shaman", style: "relaxed" as const, hardcore: true }],
+    ["Night Elf, speed", { ...DEFAULT_CHARACTER, race: "Night Elf", cls: "Druid", style: "fast" as const }],
+    ["Horde Skyborne, speed hardcore", { ...DEFAULT_CHARACTER, faction: "H" as const, race: "Skyborne", cls: "Rogue", style: "fast" as const, hardcore: true }],
+    ["Tauren, completionist", { ...DEFAULT_CHARACTER, faction: "H" as const, race: "Tauren", cls: "Hunter", style: "complete" as const }],
+  ])("leaves nothing broken on a full route: %s", async (_name, c) => {
+    const { chapters, report } = await generateRoute(c, { target: 60, dungeons: [], items: [], recipes: [] }, goals, index, rows, open, () => undefined);
+    const sections = chaptersToSections(chapters, c).map((s) => s.guide.steps);
+    const sim = simulate(sections, c, new Book(rows, index.zones, await Promise.all([...new Set(chapters.map((ch) => ch.zone!))].map(open))));
+    expect(sim.problems.filter((p) => p.severity === "error").map((p) => p.text)).toEqual([]);
+    expect(report.reached).toBeGreaterThanOrEqual(60);
+    expect(chapters.every((ch) => ch.steps.length > 0)).toBe(true);
+  }, 120000);
 });

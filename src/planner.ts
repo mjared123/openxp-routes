@@ -44,12 +44,33 @@ export function distance(a: Place | undefined, b: Place | undefined, zones: Map<
 export type SkipReason = "side" | "level" | "gray" | "hard" | "group" | "dungeon" | "special" | "slow" | "chain" | "done";
 
 /**
+ * Quests outside ordinary leveling: repeatable, raids, events, and profession
+ * or camping quests the character hasn't asked for.
+ */
+export function isSpecial(q: { name: string; repeatable?: boolean; raid?: boolean; category?: string; classes?: unknown; profession?: string; skillNeeded?: number }, c: Character, level: number): boolean {
+  if (q.repeatable || q.raid) return true;
+  if (q.profession && (!c.professions.includes(q.profession) || (q.skillNeeded ?? 0) > Math.max(75, Math.floor(level) * 5))) return true;
+  if (q.category === "Camping") {
+    const trade = /^Camping 101: (.+)$/.exec(q.name)?.[1];
+    return !c.camping || (trade !== undefined && !c.professions.includes(trade));
+  }
+  if (q.category && !q.classes && !(q.profession && c.professions.includes(q.category))) return true;
+  return false;
+}
+
+/** How many levels above the character a quest may be. The first zones are gentle, so they get some slack. */
+function stretch(c: Character, reach: number): number {
+  const most = c.style === "relaxed" ? (c.hardcore ? 0 : 1) : c.hardcore ? 1 : 2;
+  return reach < 10 ? Math.max(most, 1) : most;
+}
+
+/**
  * Why "pick for me" would leave a quest out, or nothing when it would take it.
  * `level` is where you are now, `reach` the level you'd get to in this zone.
  */
 export function skipReason(quest: Quest, c: Character, level: number, reach: number, book: Book, zone: ZoneInfo | undefined): SkipReason | undefined {
   if (!canTake(c, quest)) return "side";
-  if (quest.repeatable || quest.raid || quest.skill || (quest.category && !quest.classes)) return "special";
+  if (isSpecial({ ...quest, profession: quest.skill?.[0], skillNeeded: quest.skill?.[1] }, c, level)) return "special";
   if (!quest.start?.npcs?.length && !quest.start?.objects?.length) {
     // starts from an item: only worth planning when something in the world drops or holds it
     const data = book.quest(quest.id)?.data;
@@ -61,7 +82,7 @@ export function skipReason(quest: Quest, c: Character, level: number, reach: num
   if (quest.minLevel > Math.floor(reach)) return "level";
   const colour = difficulty(quest.level, level);
   if (colour === "gray" && c.style !== "complete") return "gray";
-  if (quest.level > Math.floor(reach) + (c.hardcore ? 1 : 2)) return "hard";
+  if (quest.level > Math.floor(reach) + stretch(c, reach)) return "hard";
   if (c.style === "fast" && (colour === "green" || book.minutes(quest.id) > 12)) return "slow";
   return undefined;
 }
@@ -86,6 +107,7 @@ export function xpFrom(ids: Iterable<number>, level: number, book: Book): number
 export function pickQuests(data: ZoneData, c: Character, state: SimState, book: Book, onRoute: Set<number>): number[] {
   const level = levelOf(state.xp);
   let picked = new Set<number>();
+  const byId = new Map(data.quests.map((q) => [q.id, q]));
   for (let round = 0; round < 8; round++) {
     const reach = levelOf(state.xp + xpFrom(picked, level, book));
     const next = new Set<number>();
@@ -93,14 +115,21 @@ export function pickQuests(data: ZoneData, c: Character, state: SimState, book: 
       if (!onRoute.has(quest.id) && !state.done.has(quest.id) && !skipReason(quest, c, level, reach, book, data.zone)) next.add(quest.id);
     }
     // a quest whose chain can't be finished here is left out, and so is what follows it
+    const dropped = new Set<number>();
     for (let changed = true; changed; ) {
       changed = false;
       const done = new Set([...state.done, ...onRoute, ...next]);
       for (const id of next) {
-        if (missingPrerequisites(id, done, c, book).length) {
+        const missing = missingPrerequisites(id, done, c, book);
+        if (!missing.length) continue;
+        // a slow quest is still worth it when it opens the rest of a chain
+        const slow = missing.map((m) => byId.get(m)).filter((q) => q && !dropped.has(q.id) && skipReason(q, c, level, reach, book, data.zone) === "slow");
+        if (slow.length === missing.length) for (const q of slow) next.add(q!.id);
+        else {
           next.delete(id);
-          changed = true;
+          dropped.add(id);
         }
+        changed = true;
       }
     }
     if (next.size === picked.size) break;
@@ -116,8 +145,11 @@ export interface Suggestion {
   xp: number;
 }
 
-/** Zones worth going to at a level: the ones with the most quest XP for this character right now, best first. */
-export function suggestZones(book: Book, c: Character, level: number, used: Set<number>, onRoute: Set<number> = new Set(), dungeons = false, from?: number): Suggestion[] {
+/**
+ * Zones worth going to at a level: the ones with the most quest XP for this character right now, best first.
+ * `catchUp` also counts easy quests left behind in zones you have outgrown.
+ */
+export function suggestZones(book: Book, c: Character, level: number, used: Set<number>, onRoute: Set<number> = new Set(), dungeons = false, from?: number, catchUp = false): Suggestion[] {
   const whole = Math.floor(level + 1e-9);
   const found = new Map<number, Suggestion>();
   const other = c.faction === "A" ? "H" : "A";
@@ -128,12 +160,13 @@ export function suggestZones(book: Book, c: Character, level: number, used: Set<
     zone.quests[c.faction] >= zone.quests[other] * 0.5 &&
     !cities.has(zone.name) &&
     !(starters.has(zone.name) && (whole >= 6 || zone.name !== START_ZONE[c.race])) &&
-    (!zone.levels || zone.levels[1] > whole);
+    (catchUp || !zone.levels || zone.levels[1] > whole);
   for (const meta of book.metas.values()) {
     const zone = book.zones.get(meta.zone);
     if (!zone || !fits(zone) || used.has(zone.id) || onRoute.has(meta.id) || (zone.kind !== "zone" && !(dungeons && zone.kind === "dungeon"))) continue;
     // quests at your level or a little above: the ones a zone is worth the trip for
-    if (!canTake(c, meta) || meta.level < whole - 1 || meta.minLevel > whole + 1 || meta.level > whole + (c.hardcore ? 2 : 3)) continue;
+    if (meta.fromItem || (meta.elite && !c.groups) || isSpecial({ ...meta, classes: meta.classes.length ? meta.classes : undefined }, c, level)) continue;
+    if (!canTake(c, meta) || meta.level < whole - (catchUp ? 7 : c.style === "complete" ? 4 : 1) || (catchUp && difficulty(meta.level, level) === "gray") || meta.minLevel > whole + 1 || meta.level > whole + (c.style === "relaxed" ? 1 : c.hardcore ? 2 : 3)) continue;
     const entry = found.get(zone.id) ?? { zone, quests: 0, xp: 0 };
     entry.quests++;
     entry.xp += questXp(meta.xp, meta.level, level);
@@ -143,7 +176,7 @@ export function suggestZones(book: Book, c: Character, level: number, used: Set<
   const home = from === undefined ? undefined : book.zones.get(from)?.continent;
   const score = (s: Suggestion) => s.xp * (home && s.zone.continent && s.zone.continent !== home ? 0.45 : 1);
   return [...found.values()]
-    .filter((s) => s.quests >= (s.zone.kind === "dungeon" ? 2 : 6))
+    .filter((s) => s.quests >= (s.zone.kind === "dungeon" ? 2 : catchUp ? 3 : 6))
     .sort((a, b) => score(b) - score(a))
     .slice(0, 6);
 }

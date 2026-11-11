@@ -16,6 +16,12 @@ export interface QuestMeta {
   preAny: number[];
   classes: string[];
   races: string[];
+  category?: string;
+  profession?: string;
+  elite: boolean;
+  repeatable: boolean;
+  raid: boolean;
+  fromItem: boolean;
 }
 
 /** An estimate of what one objective takes. */
@@ -34,7 +40,9 @@ const DEFAULT_DROP = 50;
 const MAX_KILLS = 40;
 
 function metaOf(row: QuestRow): QuestMeta {
-  return { id: row[0], name: row[1], level: row[2], minLevel: row[3], side: row[4], zone: row[5], xp: row[6] || 0, preAll: row[7] || [], preAny: row[8] || [], classes: row[9] || [], races: row[10] || [] };
+  return { id: row[0], name: row[1], level: row[2], minLevel: row[3], side: row[4], zone: row[5], xp: row[6] || 0, preAll: row[7] || [], preAny: row[8] || [], classes: row[9] || [], races: row[10] || [],
+    category: row[11] || undefined, profession: row[12] || undefined, elite: !!(row[13] & 1), repeatable: !!(row[13] & 2), raid: !!(row[13] & 4), fromItem: !!(row[13] & 8),
+  };
 }
 
 function escape(text: string): string {

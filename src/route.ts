@@ -348,3 +348,39 @@ export function colourParts(markup: string): { text: string; colour?: string }[]
   if (last < clean.length) parts.push({ text: clean.slice(last).replace(/\|r/g, "") });
   return parts;
 }
+
+// --- between zones -----------------------------------------------------------------
+
+/** Where the last step with a place leaves you. */
+export function lastPlaceOf(lists: Step[][], zoneByName: Map<string, number>): Place | undefined {
+  for (let s = lists.length - 1; s >= 0; s--) {
+    for (let i = lists[s]!.length - 1; i >= 0; i--) {
+      for (const line of lists[s]![i]!.lines) {
+        const a = readAction(line);
+        const id = a?.type === "goto" ? zoneByName.get(a.zone) : undefined;
+        if (a?.type === "goto" && id !== undefined) return { zone: id, point: [a.x, a.y] };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** "Travel to Westfall", to the flight master when the zone has one for your faction. */
+export function travelStep(zone: number, data: ZoneData | undefined, faction: Faction, zones: ZoneNames): Step {
+  const name = zones.get(zone) ?? "the next zone";
+  const master = (data?.services.flight ?? []).map((id) => data!.npcs[id]).find((n) => n && (!n.friendly || n.friendly.includes(faction)) && n.spawns[zone]);
+  const spot = master && bestSpot(master.spawns[zone] ?? []);
+  if (!master || !spot) return { lines: [{ kind: "text", marker: "+", text: `Travel to ${name}` }] };
+  return {
+    lines: [
+      writeAction({ type: "goto", zone: name, x: spot[0], y: spot[1] }),
+      text(`Travel to ${name}. Get the flight path from ${friendly(master.name)}`),
+      writeAction({ type: "target", name: master.name }),
+    ],
+  };
+}
+
+/** "Grind to level N". */
+export function grindStep(level: number): Step {
+  return { lines: [text(`Grind to level ${level}`), writeAction({ type: "reachLevel", level })] };
+}

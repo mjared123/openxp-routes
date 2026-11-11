@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lua_values import UNKNOWN, Parser, parse, tokenize  # noqa: E402
 
-FORMAT = 2
+FORMAT = 3
 
 # Forever's requiredRaces bits (QuestieDB src/corrections/enum/expansions.lua).
 RACES = {
@@ -75,6 +75,13 @@ GEAR_CLASSES = (2, 4)
 ELITE_RANKS = (1, 2, 3)
 # A boss's loot list leaves out world drops (items this many mobs can drop).
 MAX_BOSS_SOURCES = 6
+# Recipe items (class 9) by subclass.
+RECIPE_PROFESSIONS = {1: "Leatherworking", 2: "Tailoring", 3: "Engineering", 4: "Blacksmithing", 5: "Cooking",
+                      6: "Alchemy", 7: "First Aid", 8: "Enchanting", 9: "Fishing"}
+# Things players go out of their way for that aren't gear, by item id.
+FEATURED_ITEMS = {211527: "WoW Forever's sleeping bag: rest anywhere"}
+# A quest this deep into its chain (or elite, or in a dungeon) makes its gear reward a goal worth offering.
+GOAL_CHAIN = 3
 SKILLS = {129: "First Aid", 164: "Blacksmithing", 165: "Leatherworking", 171: "Alchemy", 182: "Herbalism",
           185: "Cooking", 186: "Mining", 197: "Tailoring", 202: "Engineering", 333: "Enchanting",
           356: "Fishing", 393: "Skinning", 762: "Riding"}
@@ -784,11 +791,82 @@ def main():
         })
 
     total += write_json(os.path.join(out, "quests.json"), {
-        "fields": ["id", "name", "level", "minLevel", "side", "zone", "xp", "preAll", "preAny", "classes", "races"],
+        "fields": ["id", "name", "level", "minLevel", "side", "zone", "xp", "preAll", "preAny", "classes", "races",
+                   "category", "profession", "flags"],
+        # flags: 1 elite, 2 repeatable, 4 raid, 8 starts from an item
         "quests": [[q["id"], q["name"], q["level"], q["minLevel"], q["side"], q["zone"], q.get("xp", 0),
-                    q.get("preAll", 0), q.get("preAny", 0), q.get("classes", 0), q.get("races", 0)]
+                    q.get("preAll", 0), q.get("preAny", 0), q.get("classes", 0), q.get("races", 0),
+                    q.get("category", 0), q["skill"][0] if q.get("skill") else 0,
+                    (1 if q.get("elite") else 0) | (2 if q.get("repeatable") else 0) | (4 if q.get("raid") else 0)
+                    | (8 if not q.get("start", {}).get("npcs") and not q.get("start", {}).get("objects") else 0)]
                    for q in quests.values()],
     })
+    # goals.json: things a player can ask a route to include
+    def chain_length(id_, seen=()):
+        q = quests.get(id_)
+        if not q or id_ in seen:
+            return 0
+        before = q.get("preAll", []) + q.get("preAny", [])
+        return 1 + max([chain_length(p, seen + (id_,)) for p in before] or [0])
+
+    def gear(i):
+        it = ex.item(i) or {}
+        return {k: it[k] for k in ("name", "cls", "sub", "ilvl", "req") if k in it}
+
+    goal_items = []
+    for q in quests.values():
+        if q.get("repeatable") or q.get("raid") or (q.get("category") and not q.get("classes")
+                                                     and q["category"] != "Camping"):
+            continue
+        chain = chain_length(q["id"])
+        in_dungeon = (zones.get(q["zone"]) or {}).get("kind") == "dungeon"
+        for i in q.get("rewards", []):
+            g = gear(i)
+            featured = FEATURED_ITEMS.get(i)
+            if not g.get("name") or not (featured or ("cls" in g and (chain >= GOAL_CHAIN or q.get("elite") or in_dungeon))):
+                continue
+            entry = dict(g, id=i, quest=q["id"], chain=chain)
+            if featured:
+                entry["featured"] = featured
+            goal_items.append(entry)
+    boss_items = []
+    for z, info in zones.items():
+        if info["kind"] != "dungeon":
+            continue
+        for id_, row in db["npc"].items():
+            if id_ in gear_from and ex.rank(id_) in ELITE_RANKS and (
+                    z in spawns(ex.f("npc", row, "spawns")) or ex.f("npc", row, "zoneID") == z):
+                for i in gear_from[id_]:
+                    boss_items.append(dict(gear(i), id=i, npc=id_, boss=ex.f("npc", row, "name"), zone=z))
+    recipes = []
+    for i, row in db["item"].items():
+        prof = RECIPE_PROFESSIONS.get(num(ex.f("item", row, "subClass"), 0)) if num(ex.f("item", row, "class"), 0) == 9 else None
+        if not prof or not isinstance(ex.f("item", row, "name"), str):
+            continue
+        sellers = []
+        for v in ids(ex.f("item", row, "vendors")):
+            n = ex.npc(v)
+            where = n and next(((zz, pts[0]) for zz, pts in n["spawns"].items() if pts), None)
+            if where and int(where[0]) in zones:
+                sellers.append({"npc": v, "name": n["name"], "zone": int(where[0]), "at": where[1],
+                                **({"friendly": n["friendly"]} if n.get("friendly") else {})})
+        from_quests = [qid for qid in ids(ex.f("item", row, "questRewards")) if qid in quests]
+        if sellers or from_quests:
+            r = {"id": i, "name": ex.f("item", row, "name"), "profession": prof}
+            if num(ex.f("item", row, "itemLevel"), 0):
+                r["ilvl"] = ex.f("item", row, "itemLevel")
+            if sellers:
+                r["vendors"] = sellers[:6]
+            if from_quests:
+                r["quests"] = from_quests
+            recipes.append(r)
+    total += write_json(os.path.join(out, "goals.json"), {
+        "items": sorted(goal_items, key=lambda g: (quests[g["quest"]]["level"], g["name"])),
+        "bossItems": sorted(boss_items, key=lambda g: (g["zone"], g.get("ilvl", 0), g["name"])),
+        "recipes": sorted(recipes, key=lambda r: (r["profession"], r.get("ilvl", 0), r["name"])),
+    })
+    report.append("goals: %d quest rewards, %d boss drops, %d recipes" % (len(goal_items), len(boss_items), len(recipes)))
+
     try:
         commit = subprocess.run(["git", "-C", qdb, "rev-parse", "HEAD"], capture_output=True,
                                 text=True, check=True).stdout.strip()

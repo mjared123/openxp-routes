@@ -1,6 +1,7 @@
 /** The editor's state: a character and a route of one or more sections, with undo and saving in the browser. */
 import { useCallback, useEffect, useReducer } from "react";
 import { DEFAULT_CHARACTER, type Character } from "./character";
+import { NO_GOALS, type Goals, type Report } from "./generate";
 import { guideTag, parseGuide, readAction, serializeGuide, type Guide, type Step } from "./guide";
 import { ROUTE_GROUP, guideFaction, newGuide, setGuideFaction, setGuideName } from "./route";
 
@@ -25,6 +26,10 @@ export interface Project {
   wanted: number[];
   /** False until the character has been set up once. */
   ready: boolean;
+  /** What the player asked for when the route was generated. */
+  goals: Goals;
+  /** How generating went: what was included and what wasn't. */
+  report?: Report;
 }
 
 export interface RouteState {
@@ -57,7 +62,7 @@ export function newSection(name: string, character: Character, zone: number | nu
 }
 
 export function newProject(character: Character = DEFAULT_CHARACTER, ready = false): Project {
-  return { name: "My route", character, sections: [newSection("Section 1", character, null)], active: 0, wanted: [], ready };
+  return { name: "My route", character, sections: [newSection("Section 1", character, null)], active: 0, wanted: [], ready, goals: NO_GOALS };
 }
 
 function change(state: RouteState, project: Project, selected = state.selected): RouteState {
@@ -137,10 +142,12 @@ interface Saved {
   sections: { zone: number | null; text: string }[];
   active: number;
   wanted: number[];
+  goals?: Goals;
+  report?: Report;
 }
 
 export function saveProject(p: Project): string {
-  const saved: Saved = { name: p.name, character: p.character, sections: p.sections.map((s) => ({ zone: s.zone, text: serializeGuide(s.guide) })), active: p.active, wanted: p.wanted };
+  const saved: Saved = { name: p.name, character: p.character, sections: p.sections.map((s) => ({ zone: s.zone, text: serializeGuide(s.guide) })), active: p.active, wanted: p.wanted, goals: p.goals, report: p.report };
   return JSON.stringify(saved);
 }
 
@@ -155,6 +162,8 @@ export function loadProject(json: string): Project {
     active: Math.min(Math.max(0, saved.active || 0), sections.length - 1),
     wanted: saved.wanted ?? [],
     ready: true,
+    goals: { ...NO_GOALS, ...saved.goals },
+    report: saved.report,
   };
 }
 
@@ -177,7 +186,7 @@ export function projectFromGuides(guides: Guide[], character: Character, zoneByN
     const title = (guideTag(guide, "name") ?? `Section ${i + 1}`).replace(/^\d+\.\s+/, "");
     return { zone: zoneByName.get(mainZone(guide) ?? "") ?? null, guide: setGuideName(guide, title) };
   });
-  return { name, character: { ...character, faction }, sections, active: 0, wanted: [], ready: true };
+  return { name, character: { ...character, faction }, sections, active: 0, wanted: [], ready: true, goals: NO_GOALS };
 }
 
 /** The route's guides as the addon reads them: numbered, and each one leading to the next. */

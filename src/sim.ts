@@ -63,8 +63,9 @@ export function missingPrerequisites(id: number, done: Set<number>, c: Character
   return missing;
 }
 
-export function simulate(sections: Step[][], c: Character, book: Book): Simulation {
-  const state: SimState = { xp: xpAtLevel(c.level), accepted: new Set(), done: new Set() };
+/** `from` continues a route: the XP and quest log to start with. */
+export function simulate(sections: Step[][], c: Character, book: Book, from?: SimState): Simulation {
+  const state: SimState = from ? copy(from) : { xp: xpAtLevel(c.level), accepted: new Set(), done: new Set() };
   const counted = new Map<number, Set<number>>();
   const out: Simulation = { steps: [], problems: [], sections: [], before: [], end: state };
 

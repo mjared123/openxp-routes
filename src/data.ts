@@ -38,6 +38,7 @@ export interface Quest {
   xp?: number;
   text?: string;
   category?: string;
+  givenItem?: number;
   start?: { npcs?: number[]; objects?: number[]; items?: number[] };
   end?: { npcs?: number[]; objects?: number[] };
   objectives?: Objective[];
@@ -100,8 +101,39 @@ export interface DataIndex {
   zones: ZoneInfo[];
 }
 
-/** [id, name, level, minLevel, side, zone, xp, preAll, preAny, classes, races]; the last four are 0 when empty */
-export type QuestRow = [number, string, number, number, Side, number, number, number[] | 0, number[] | 0, string[] | 0, string[] | 0];
+/**
+ * [id, name, level, minLevel, side, zone, xp, preAll, preAny, classes, races, category, profession, flags];
+ * empty fields are 0. flags: 1 elite, 2 repeatable, 4 raid, 8 starts from an item.
+ */
+export type QuestRow = [number, string, number, number, Side, number, number, number[] | 0, number[] | 0, string[] | 0, string[] | 0, string | 0, string | 0, number];
+
+/** A quest reward worth asking a route for. */
+export interface GoalItem extends Item {
+  id: number;
+  quest: number;
+  /** How many quests deep in its chain the rewarding quest is. */
+  chain: number;
+  featured?: string;
+}
+export interface BossItem extends Item {
+  id: number;
+  npc: number;
+  boss: string;
+  zone: number;
+}
+export interface Recipe {
+  id: number;
+  name: string;
+  profession: string;
+  ilvl?: number;
+  vendors?: { npc: number; name: string; zone: number; at: Point; friendly?: string }[];
+  quests?: number[];
+}
+export interface GoalData {
+  items: GoalItem[];
+  bossItems: BossItem[];
+  recipes: Recipe[];
+}
 
 const base = `${import.meta.env.BASE_URL}data/`;
 
@@ -112,6 +144,14 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const loadIndex = () => getJson<DataIndex>("index.json");
+export const loadGoals = () => getJson<GoalData>("goals.json");
+
+/** A tooltip line: plain text, or [text, format, text on the right]. */
+export type TipLine = string | [string, string, string?];
+/** [icon name, quality 0-5 (-1 when unknown), tooltip lines] */
+export type ItemInfo = [string, number, TipLine[]];
+export type ItemTable = Record<number, ItemInfo>;
+export const loadItems = () => getJson<ItemTable>("items.json");
 export const loadQuestRows = async () => (await getJson<{ quests: QuestRow[] }>("quests.json")).quests;
 
 const zoneCache = new Map<number, Promise<ZoneData>>();

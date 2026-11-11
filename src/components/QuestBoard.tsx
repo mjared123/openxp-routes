@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Book } from "../book";
+import { ItemIcon, ItemTip } from "./Item";
 import { canTake, canUse, isUpgradeType, itemType, type Character } from "../character";
 import type { DataIndex, Item, Quest, QuestRow, ZoneData, ZoneInfo } from "../data";
 import { skipReason, xpFrom, type SkipReason } from "../planner";
@@ -101,12 +102,15 @@ function inChains(quests: Quest[]): Entry[][] {
     .sort((a, b) => Math.min(...a.map((e) => key(e.quest))) - Math.min(...b.map((e) => key(e.quest))) || a[0]!.quest.id - b[0]!.quest.id);
 }
 
-function Reward({ item, c, level }: { item: Item; c: Character; level: number }) {
+function Reward({ id, item, c, level }: { id: number; item: Item; c: Character; level: number }) {
   const type = itemType(item);
   const usable = canUse(item, c.cls, Math.max(level, item.req ?? 0));
   return (
     <li className={`reward${type && !usable ? " unusable" : ""}${isUpgradeType(item, c.cls, level) ? " good" : ""}`}>
-      <span className="reward-name">{item.name}</span>
+      <ItemTip id={id} name={item.name} className="reward-name">
+        <ItemIcon id={id} size={24} />
+        {item.name}
+      </ItemTip>
       {type && <span className="reward-type">{type}</span>}
       {item.req ? <span className="reward-type">needs {item.req}</span> : null}
       {type && !usable && <span className="reward-type no">not for {c.cls}s</span>}
@@ -239,7 +243,7 @@ export function QuestBoard(p: Props) {
               <>
                 <h5>Rewards</h5>
                 <ul className="rewards">
-                  {quest.rewards.map((id) => p.data!.items[id] && <Reward key={id} item={p.data!.items[id]} c={c} level={p.level} />)}
+                  {quest.rewards.map((id) => p.data!.items[id] && <Reward key={id} id={id} item={p.data!.items[id]} c={c} level={p.level} />)}
                 </ul>
               </>
             )}
@@ -406,7 +410,7 @@ export function QuestBoard(p: Props) {
               <button className="reward-quest" onClick={() => { setTab("quests"); p.onSelectQuest(quest.id); }}>
                 <span className={`lvl diff-${difficulty(quest.level, p.level)}`}>{quest.level}</span> {quest.name}
               </button>
-              <ul className="rewards">{quest.rewards!.map((id) => p.data!.items[id] && <Reward key={id} item={p.data!.items[id]} c={c} level={p.level} />)}</ul>
+              <ul className="rewards">{quest.rewards!.map((id) => p.data!.items[id] && <Reward key={id} id={id} item={p.data!.items[id]} c={c} level={p.level} />)}</ul>
             </div>
           ))}
           {p.data?.bosses && (
@@ -418,7 +422,7 @@ export function QuestBoard(p: Props) {
                     <Icon name="skull" size={14} /> {p.data!.npcs[b.npc]?.name}
                     {p.data!.npcs[b.npc]?.level && <small> level {p.data!.npcs[b.npc]!.level!.join("-")}</small>}
                   </div>
-                  <ul className="rewards">{b.loot.map((id) => p.data!.items[id] && <Reward key={id} item={p.data!.items[id]} c={c} level={p.level} />)}</ul>
+                  <ul className="rewards">{b.loot.map((id) => p.data!.items[id] && <Reward key={id} id={id} item={p.data!.items[id]} c={c} level={p.level} />)}</ul>
                 </div>
               ))}
             </>

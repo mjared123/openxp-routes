@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Book } from "./book";
 import { canTake, startZone, type Character } from "./character";
+import { Forging, Home, Journey } from "./components/adventure/Screens";
+import { Wizard } from "./components/adventure/Wizard";
 import { CharacterDialog } from "./components/CharacterDialog";
 import { ExportDialog, ImportDialog, PromptDialog, type PromptRequest } from "./components/Dialogs";
 import { Icon } from "./components/Icon";
 import { MapView, type Pin, type RouteStop } from "./components/MapView";
 import { QuestBoard } from "./components/QuestBoard";
 import { RoutePanel } from "./components/RoutePanel";
-import { bestSpot, loadIndex, loadQuestRows, loadZone, type DataIndex, type Point, type Quest, type QuestRow, type Spawns, type ZoneData } from "./data";
+import { bestSpot, loadGoals, loadIndex, loadQuestRows, loadZone, type DataIndex, type GoalData, type Point, type Quest, type QuestRow, type Spawns, type ZoneData } from "./data";
+import { chaptersToSections, generateRoute, type Goals, type Progress } from "./generate";
 import { guideTag, readAction, serializeLine, writeAction, type Step } from "./guide";
 import { pickQuests, planRoute, removeQuest, suggestZones } from "./planner";
 import { addStep, noteStep, objectiveStep, questGiverStep, questUse, sameStep, serviceStep, summarize, waypointStep, type Built, type Place, type ZoneNames } from "./route";
@@ -45,6 +48,9 @@ export function App() {
   const [dialog, setDialog] = useState<"export" | "import" | "character" | null>(null);
   const [ask, setAsk] = useState<PromptRequest | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [goalData, setGoalData] = useState<GoalData | null>(null);
+  const [view, setView] = useState<"home" | "wizard" | "forging" | "journey" | "editor">(() => (project.ready && project.sections.some((s) => s.guide.steps.length) ? "journey" : "home"));
+  const [progress, setProgress] = useState<Progress | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -57,6 +63,7 @@ export function App() {
   useEffect(() => {
     loadIndex().then(setIndex, (e: Error) => setError(e.message));
     loadQuestRows().then(setRows, (e: Error) => setError(e.message));
+    loadGoals().then(setGoalData, (e: Error) => setError(e.message));
   }, []);
 
   // the board shows the active section's zone
@@ -338,7 +345,73 @@ export function App() {
       </div>
     );
   }
-  if (!index || !rows.length) return <div className="fatal">Loading…</div>;
+  if (!index || !rows.length || !goalData) return <div className="fatal">Loading…</div>;
+
+  const forge = async (who: Character, goals: Goals) => {
+    setProgress(null);
+    setView("forging");
+    try {
+      const started = Date.now();
+      const { chapters, report } = await generateRoute(who, goals, goalData, index, rows, loadZone, setProgress);
+      // long enough to see it happen
+      await new Promise((r) => setTimeout(r, Math.max(0, 1800 - (Date.now() - started))));
+      const base = newProject(who, true);
+      const sections = chapters.length ? chaptersToSections(chapters, who) : base.sections;
+      dispatch({ type: "load", project: { ...base, name: `${who.race} ${who.cls}, ${who.level} to ${Math.floor(report.reached + 1e-9)}`, sections, goals, report } });
+      setView("journey");
+    } catch (e) {
+      say(e instanceof Error ? e.message : "Couldn't build the route.");
+      setView("wizard");
+    }
+  };
+  const dialogs = (
+    <>
+      {dialog === "export" && project.ready && <ExportDialog project={project} active={active} onClose={() => setDialog(null)} />}
+      {dialog === "import" && (
+        <ImportDialog
+          hasSteps={allSteps.some((s) => s.length > 0)}
+          character={c}
+          zoneByName={zoneByName}
+          onImport={(p) => {
+            dispatch({ type: "load", project: p });
+            setView("journey");
+          }}
+          onClose={() => setDialog(null)}
+        />
+      )}
+    </>
+  );
+  const hasRoute = project.ready && allSteps.some((s) => s.length > 0);
+  if (view === "forging") return <Forging progress={progress} start={progress ? Math.min(progress.level, c.level) : c.level} tone={c.faction === "A" ? "alliance" : "horde"} />;
+  if (view === "wizard") return <Wizard index={index} book={book} goalData={goalData} character={c} goals={project.goals} onForge={forge} onCancel={() => setView(hasRoute ? "journey" : "home")} cancelLabel={hasRoute ? "Back to my route" : "Back to start"} />;
+  if (view === "home" || !project.ready) {
+    return (
+      <>
+        <Home hasRoute={hasRoute} onBegin={() => setView("wizard")} onContinue={() => setView("journey")} onImport={() => setDialog("import")} />
+        {dialogs}
+      </>
+    );
+  }
+  if (view === "journey") {
+    return (
+      <>
+        <Journey
+          goalData={goalData}
+          project={project}
+          sim={sim}
+          index={index}
+          onOpen={(i) => {
+            dispatch({ type: "activate", index: i });
+            setView("editor");
+          }}
+          onExport={() => setDialog("export")}
+          onNew={() => setView("wizard")}
+          onName={(name) => dispatch({ type: "name", name })}
+        />
+        {dialogs}
+      </>
+    );
+  }
 
   const saveCharacter = (next: Character) => {
     const first = !project.ready;
@@ -350,7 +423,6 @@ export function App() {
     }
   };
   const start = levelParts(levelHere);
-  const totalSteps = allSteps.reduce((n, s) => n + s.length, 0);
 
   return (
     <div className="app">
@@ -381,15 +453,11 @@ export function App() {
         <button className="ghost" onClick={() => dispatch({ type: "redo" })} disabled={!state.future.length} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
           <Icon name="redo" />
         </button>
-        <button
-          onClick={() => {
-            if (!totalSteps || confirm("Start a new, empty route? Undo brings this one back.")) {
-              dispatch({ type: "load", project: newProject(c) });
-              setDialog("character");
-            }
-          }}
-        >
-          New
+        <button onClick={() => setView("journey")} title="Back to the overview of your route">
+          Overview
+        </button>
+        <button onClick={() => setView("wizard")} title="Answer the questions again and build a new route">
+          New adventure
         </button>
         <button onClick={() => setDialog("import")}>
           <Icon name="upload" /> Import
@@ -532,17 +600,8 @@ export function App() {
         }}
       />
 
-      {(dialog === "character" || !project.ready) && <CharacterDialog character={c} first={!project.ready} onSave={saveCharacter} onClose={project.ready ? () => setDialog(null) : undefined} />}
-      {dialog === "export" && project.ready && <ExportDialog project={project} active={active} onClose={() => setDialog(null)} />}
-      {dialog === "import" && project.ready && (
-        <ImportDialog
-          hasSteps={totalSteps > 0}
-          character={c}
-          zoneByName={zoneByName}
-          onImport={(p) => dispatch({ type: "load", project: p })}
-          onClose={() => setDialog(null)}
-        />
-      )}
+      {dialog === "character" && <CharacterDialog character={c} first={false} onSave={saveCharacter} onClose={() => setDialog(null)} />}
+      {dialogs}
       {ask && <PromptDialog request={ask} onClose={() => setAsk(null)} />}
     </div>
   );

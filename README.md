@@ -1,26 +1,33 @@
 # OpenXP Routes
 
-A website for planning a World of Warcraft: Forever leveling route for your character. Tell it who you play,
-tick the quests you want (or let it pick), and it builds an ordered list of steps on a zone map, tells you what
-level you'll be along the way, and exports guides for the [OpenXP](https://github.com/mjared123/OpenXP) addon.
+A website that builds a World of Warcraft: Forever leveling route for your character. Answer a few questions
+about how you want to play and what you want to get, and it plans the whole road for you: every quest in order
+on a zone map, the level you'll be along the way, and guides for the
+[OpenXP](https://github.com/mjared123/OpenXP) addon.
 
-Status: the builder works in the browser, from character to exported guide files. Sharing routes online comes next.
+Status: it works in the browser, from the first question to exported guide files. Sharing routes online comes next.
 
-## Using the builder
+## Crafting an adventure
 
-1. **Character.** Faction, race, class, starting level, normal or hardcore, and a play style (fast, balanced,
-   everything). The builder only shows quests that character can take.
-2. **Pick quests.** The board on the left lists a zone's quests chain by chain, coloured the way the game colours
-   them for your level, with XP, class quests, elite quests and gear you can use marked. **Pick quests for me**
-   ticks everything that suits your level and choices. Ticking a quest yourself also ticks what it needs first.
-3. **Build route.** The planner puts the ticked quests in order: from where you stand it always does the nearest
-   thing you are able to do, then moves single stops to shorten the walk. Chains, level requirements and the
-   20-quest log are respected, and "grind to level" steps are added where nothing else is open.
-4. **Check it.** The route panel shows your level after every step and lists what would go wrong in game: a quest
-   accepted before its chain, too low a level, a full quest log, quests never turned in, quests that are risky in
-   hardcore. Most problems have a button that fixes them.
-5. **Go on.** **Add a section** suggests the zones with the most quest XP for your level. Each section is one
-   guide; the whole route exports as guides that lead into each other.
+1. **Hero.** Faction, race, class, the level you start at and the level you want to reach.
+2. **Pace.** Speed leveling, efficient, relaxed or completionist, normal or hardcore, with or without elite quests.
+3. **Dungeons.** Pick the ones you want to run. Each card shows boss drops your class can use.
+4. **Treasures.** Pick quest rewards worth a detour, such as the weapon at the end of a chain or Forever's Cozy
+   Sleeping Bag. Hover any item to see its icon and tooltip.
+5. **Trades.** Professions, camping quests, and recipes to buy or earn on the way.
+6. **Forge.** The site walks the world for your character: it picks the best zone for each level, takes the
+   quests that fit your pace, follows the chains behind everything you asked for, slots dungeons in when you are
+   the right level, sends you past the vendors of your recipes, and puts every step in walking order.
+
+The result is your adventure as a list of chapters with the levels you'll be, and a note for every wish on whether
+it made the route. **Export for OpenXP** gives you the guide files.
+
+## Fine-tuning
+
+**Fine-tune the steps** opens the editor on any chapter. The quest board on the left lists the zone's quests chain
+by chain; tick or untick them and **Re-plan**. The route panel shows your level after every step and lists what
+would go wrong in game (a quest before its chain, too low a level, a full quest log), most with a button that fixes
+it. **Add a section** suggests the zones with the most quest XP for your level.
 
 You can still work by hand: open a quest to add a single accept, objective or turn-in step; **Travel and notes**
 adds flight paths, Hearthstone binds, waypoints, notes and "grind to a level" steps; drag steps to reorder,
@@ -75,6 +82,21 @@ such as a class or profession.
 
 Tests: `python3 -m unittest discover -s tools/tests`.
 
+## Item icons and tooltips
+
+Questie's data has no icons, quality or stats, so those come from two other open sources: the
+[wow-classic-items](https://github.com/Nakroma/wow-classic-items) package (MIT) for icon names, quality and
+tooltip lines, and [wow-ui-textures](https://github.com/Gethe/wow-ui-textures) for the icon art itself.
+
+```sh
+npm pack wow-classic-items && tar xzf wow-classic-items-*.tgz
+python3 tools/export_items.py --items package/data/json/data.json --icons <folder of icon PNGs>
+```
+
+This writes `public/data/items.json` and `public/icons/`. It needs Pillow for the icons. Items that only exist
+in Forever are not in that package: they get an icon that fits their type and a short tooltip from what Questie
+knows (type, item level, required level), and say so.
+
 ## Develop
 
 ```sh
@@ -96,6 +118,9 @@ To also test the guide reader against every guide OpenXP ships, point `OPENXP_DI
 | `src/book.ts` | Quest knowledge: chains, and how much work an objective is. |
 | `src/sim.ts` | Plays a route in its head: level after each step, and the problems. |
 | `src/planner.ts` | Picks quests, orders them into steps, suggests the next zone. |
+| `src/generate.ts` | Builds a whole route from the answers: zones, dungeons, wished-for items and recipes. |
+| `src/components/adventure` | The front door: landing, questions, progress and the finished journey. |
+| `src/components/Item.tsx` | Item icons and tooltips. |
 | `src/store.ts` | The route (character plus sections), undo, saving, import and export. |
 | `src/route.ts` | Turns quests into guide steps and back. |
 
@@ -111,5 +136,7 @@ Routes are shared as a single line of text; see [docs/share-string.md](docs/shar
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE). The quest data comes from [QuestieDB](https://github.com/Questie/QuestieDB),
-which is GPLv3; that is why this project is too. World of Warcraft and its art are Blizzard Entertainment's.
+which is GPLv3; that is why this project is too. Item tooltips come from
+[wow-classic-items](https://github.com/Nakroma/wow-classic-items) (MIT). World of Warcraft, its item icons and
+its art are Blizzard Entertainment's.
 This is a fan project, not affiliated with Blizzard, Questie or RestedXP.
