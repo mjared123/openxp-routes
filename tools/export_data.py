@@ -71,6 +71,10 @@ CONTINENTS = {0: "Eastern Kingdoms", 1: "Kalimdor"}
 MAX_DROP_SOURCES = 40
 
 
+# Placeholder quests Blizzard left in the data; they can't be picked up in game.
+JUNK = re.compile(r"^<|\bREUSE\b|\bUNUSED\b|\bDEPRECATED\b|^\[PH\]|^zzOLD|\bTEST\b", re.I)
+
+
 def read(path):
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
@@ -375,7 +379,7 @@ class Exporter:
     def quest(self, id_):
         row = self.q[id_]
         g = lambda name: self.f("quest", row, name)  # noqa: E731
-        if not isinstance(g("name"), str) or not g("name").strip():
+        if not isinstance(g("name"), str) or not g("name").strip() or JUNK.search(g("name")):
             return None
         q = {"id": id_, "name": g("name"), "level": num(g("questLevel"), 0),
              "minLevel": num(g("requiredLevel"), 0), "side": side(g("requiredRaces"))}
@@ -665,7 +669,8 @@ def main():
 
         levels = sorted(q["level"] for q in qs if q["level"] and q["level"] > 0)
         if levels:
-            info["levels"] = [levels[len(levels) // 10], levels[(len(levels) * 9) // 10 - (len(levels) > 9)]]
+            # the middle of the zone: class, profession and raid quests stretch the ends
+            info["levels"] = [levels[len(levels) // 10], levels[(len(levels) * 8) // 10 - (len(levels) > 9)]]
         info["quests"] = {"A": sum(q["side"] != "H" for q in qs), "H": sum(q["side"] != "A" for q in qs)}
         zone_list.append(info)
         total += write_json(os.path.join(out, "zones", "%d.json" % z), {

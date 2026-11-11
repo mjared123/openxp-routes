@@ -130,7 +130,8 @@ describe("share strings", () => {
  */
 const openxp = process.env.OPENXP_DIR;
 describe.skipIf(!openxp || !existsSync(join(openxp, "Guides")))("OpenXP's own guides", () => {
-  const files = ["forever", "openxp"].flatMap((dir) => {
+  // describe bodies run even when skipped, so don't touch the folder unless it is there
+  const files = (openxp ? ["forever", "openxp"] : []).flatMap((dir) => {
     const path = join(openxp!, "Guides", dir);
     return existsSync(path) ? readdirSync(path).filter((f) => f.endsWith(".lua")).map((f) => join(path, f)) : [];
   });

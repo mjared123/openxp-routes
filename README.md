@@ -4,14 +4,33 @@ A website for building World of Warcraft: Forever leveling routes visually: an o
 a zone map, exported as a guide you can paste into the [OpenXP](https://github.com/mjared123/OpenXP) addon
 with `/oxp import`.
 
-Status: early. The quest data export is in place; the editor comes next.
+Status: the editor works for building a route in the browser and exporting it. Sharing routes online comes next.
 
 ## Plan
 
 1. **Data export** (done): `tools/export_data.py` turns Questie's public database into JSON under `public/data`.
 2. **Route format** (done): `src/guide` reads and writes OpenXP's guide format, so routes go to the addon and back unchanged.
-3. **Editor**: zone map plus ordered step list, saved in the browser, with guide import and export.
+3. **Editor** (done): zone map plus ordered step list, saved in the browser, with guide import and export.
 4. **Sharing**: accounts, publishing, browsing and forking routes.
+
+## Using the editor
+
+- Pick a zone and a faction. Quests you can still pick up show as `!` pins on the map and in the list on the left.
+- Open a quest and press **Accept**, an objective, or **Turn in**. Each one becomes a step on the right and a numbered
+  stop on the map. Accepting or turning in a second quest at the same quest giver joins the step that is already there.
+- **Travel and notes** adds flight paths, Hearthstone binds, waypoints you place on the map, and free-text notes.
+- Click a step to select it; new steps go in after it. Drag steps to reorder, double-click a step's text to edit it.
+  Undo is Ctrl+Z, redo is Ctrl+Shift+Z, Delete removes the selected step.
+- **Export** gives a share string, the guide text, or a guide file for the addon. **Import** reads any of the three.
+  Lines of an imported guide that the editor doesn't understand are kept and shown as written.
+
+The route is saved in your browser as you work.
+
+### Zone maps
+
+The map shows `public/maps/<zone id>.jpg` when that file exists. Otherwise it tries the address in `VITE_MAP_URL`
+(see `.env`; `{id}` is the zone id), and falls back to a plain grid. Zone ids are in `public/data/index.json`.
+Map art is Blizzard's and is not part of this repository.
 
 ## Quest data
 
