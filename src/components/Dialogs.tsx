@@ -1,22 +1,62 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { decodeShareString, encodeShareString, extractGuides, parseGuide, serializeGuide, SHARE_PREFIX, type Guide } from "../guide";
+import type { Character } from "../character";
+import { decodeShareString, encodeShareString, extractGuides, guideTag, parseGuide, serializeGuide, SHARE_PREFIX, type Guide } from "../guide";
+import { exportGuides, projectFromGuides, type Project } from "../store";
 import { Icon } from "./Icon";
 
-function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({ title, onClose, children, wide }: { title: string; onClose?: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
   }, []);
   return (
-    <dialog ref={ref} className="dialog" onClose={onClose} onClick={(e) => e.target === ref.current && onClose()}>
+    <dialog
+      ref={ref}
+      className={`dialog${wide ? " wide" : ""}`}
+      onClose={onClose}
+      onCancel={(e) => !onClose && e.preventDefault()}
+      onClick={(e) => e.target === ref.current && onClose?.()}
+    >
       <header>
         <h2>{title}</h2>
-        <button className="ghost" onClick={onClose} aria-label="Close">
-          <Icon name="close" />
-        </button>
+        {onClose && (
+          <button className="ghost" onClick={onClose} aria-label="Close">
+            <Icon name="close" />
+          </button>
+        )}
       </header>
       {children}
     </dialog>
+  );
+}
+
+export interface PromptRequest {
+  title: string;
+  label: string;
+  initial: string;
+  onDone: (value: string) => void;
+}
+
+/** A one-line question, in place of the browser's own prompt box. */
+export function PromptDialog({ request, onClose }: { request: PromptRequest; onClose: () => void }) {
+  const [value, setValue] = useState(request.initial);
+  const done = () => {
+    if (value.trim()) request.onDone(value.trim());
+    onClose();
+  };
+  return (
+    <Dialog title={request.title} onClose={onClose}>
+      <label className="field stacked">
+        <span>{request.label}</span>
+        <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && done()} />
+      </label>
+      <footer>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={!value.trim()} onClick={done}>
+          Add
+        </button>
+      </footer>
+    </Dialog>
   );
 }
 
@@ -44,30 +84,45 @@ function fileName(name: string): string {
   return (name.trim().replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "route") + ".lua";
 }
 
-export function ExportDialog({ guide, name, onClose }: { guide: Guide; name: string; onClose: () => void }) {
-  const [tab, setTab] = useState<"share" | "text" | "file">("share");
-  const text = serializeGuide(guide);
-  const share = encodeShareString([text]);
-  const lua = `-- ${name}\n-- Made with OpenXP Routes\nRXPGuides.RegisterGuide([[\n${text}]])\n`;
-  const empty = guide.steps.length === 0;
+export function ExportDialog({ project, active, onClose }: { project: Project; active: number; onClose: () => void }) {
+  const [tab, setTab] = useState<"share" | "text" | "file">("file");
+  const many = project.sections.length > 1;
+  const [whole, setWhole] = useState(true);
+  const guides = exportGuides(project, many && !whole ? active : undefined);
+  const texts = guides.map(serializeGuide);
+  const text = texts.join("\n");
+  const share = encodeShareString(texts);
+  const name = many && !whole ? `${project.name} ${guideTag(guides[0]!, "name") ?? ""}` : project.name;
+  const lua = `-- ${name}\n-- Made with OpenXP Routes\n${texts.map((t) => `RXPGuides.RegisterGuide([[\n${t}]])\n`).join("\n")}`;
+  const empty = guides.every((g) => g.steps.length === 0);
 
   return (
     <Dialog title="Export route" onClose={onClose}>
+      {many && (
+        <div className="segmented export-scope" role="group" aria-label="What to export">
+          <button className={whole ? "on" : ""} onClick={() => setWhole(true)}>
+            Whole route ({project.sections.length} sections)
+          </button>
+          <button className={whole ? "" : "on"} onClick={() => setWhole(false)}>
+            Only section {active + 1}
+          </button>
+        </div>
+      )}
       <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "file"} onClick={() => setTab("file")}>
+          Addon file
+        </button>
         <button role="tab" aria-selected={tab === "share"} onClick={() => setTab("share")}>
           Share string
         </button>
         <button role="tab" aria-selected={tab === "text"} onClick={() => setTab("text")}>
           Guide text
         </button>
-        <button role="tab" aria-selected={tab === "file"} onClick={() => setTab("file")}>
-          Addon file
-        </button>
       </div>
       {empty && <p className="notice">This route has no steps yet.</p>}
       {tab === "share" && (
         <>
-          <p>One line of text that holds the whole route. Send it to a friend, or paste it into Import here to keep working on it.</p>
+          <p>One line of text that holds {many && whole ? "every section of the route" : "the route"}. Send it to a friend, or paste it into Import here to keep working on it.</p>
           <textarea readOnly value={share} rows={5} onFocus={(e) => e.target.select()} />
           <footer>
             <CopyButton text={share} label="Copy share string" />
@@ -76,7 +131,7 @@ export function ExportDialog({ guide, name, onClose }: { guide: Guide; name: str
       )}
       {tab === "text" && (
         <>
-          <p>The route in OpenXP's guide format, as you would write it by hand.</p>
+          <p>The route in OpenXP's guide format, as you would write it by hand.{many && whole ? " Each section is its own guide and leads to the next." : ""}</p>
           <textarea readOnly value={text} rows={14} className="mono" onFocus={(e) => e.target.select()} />
           <footer>
             <CopyButton text={text} label="Copy guide text" />
@@ -87,7 +142,7 @@ export function ExportDialog({ guide, name, onClose }: { guide: Guide; name: str
         <>
           <p>
             A guide file for the OpenXP addon. Save it in the addon's <code>Guides</code> folder and add it to the guide list to
-            load it in game.
+            load it in game.{many && whole ? " Each section is its own guide and leads to the next." : ""}
           </p>
           <textarea readOnly value={lua} rows={10} className="mono" />
           <footer>
@@ -101,26 +156,26 @@ export function ExportDialog({ guide, name, onClose }: { guide: Guide; name: str
   );
 }
 
-/** A guide from pasted text: a share string, an addon file, or plain guide text. */
-export function readImport(input: string): { guide: Guide; more: number } {
+/** Guides from pasted text: a share string, an addon file, or plain guide text. */
+export function readImport(input: string): Guide[] {
   const text = input.trim();
   if (!text) throw new Error("Paste a share string or guide text first.");
-  let guides: string[];
-  if (text.startsWith(SHARE_PREFIX)) guides = decodeShareString(text);
-  else if (/RegisterGuide\(\s*\[\[/.test(text)) guides = extractGuides(text);
-  else guides = [text];
-  const guide = parseGuide(guides[0] ?? "");
-  if (!guide.steps.length) throw new Error("That doesn't look like a guide: it has no steps.");
-  return { guide, more: guides.length - 1 };
+  let texts: string[];
+  if (text.startsWith(SHARE_PREFIX)) texts = decodeShareString(text);
+  else if (/RegisterGuide\(\s*\[\[/.test(text)) texts = extractGuides(text);
+  else texts = [text];
+  const guides = texts.map(parseGuide).filter((g) => g.steps.length);
+  if (!guides.length) throw new Error("That doesn't look like a guide: it has no steps.");
+  return guides;
 }
 
-export function ImportDialog({ hasSteps, onImport, onClose }: { hasSteps: boolean; onImport: (guide: Guide) => void; onClose: () => void }) {
+export function ImportDialog({ hasSteps, character, zoneByName, onImport, onClose }: { hasSteps: boolean; character: Character; zoneByName: Map<string, number>; onImport: (project: Project) => void; onClose: () => void }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   return (
     <Dialog title="Import route" onClose={onClose}>
-      <p>Paste a share string, guide text, or the contents of an addon guide file. You can also choose a file.</p>
+      <p>Paste a share string, guide text, or the contents of an addon guide file. You can also choose a file. A file with several guides becomes a route with several sections.</p>
       <textarea
         value={text}
         rows={10}
@@ -150,8 +205,7 @@ export function ImportDialog({ hasSteps, onImport, onClose }: { hasSteps: boolea
           className="primary"
           onClick={() => {
             try {
-              const { guide } = readImport(text);
-              onImport(guide);
+              onImport(projectFromGuides(readImport(text), character, zoneByName));
               onClose();
             } catch (err) {
               setError(err instanceof Error ? err.message : "That couldn't be read.");

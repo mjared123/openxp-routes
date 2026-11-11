@@ -1,30 +1,43 @@
 # OpenXP Routes
 
-A website for building World of Warcraft: Forever leveling routes visually: an ordered list of steps next to
-a zone map, exported as a guide you can paste into the [OpenXP](https://github.com/mjared123/OpenXP) addon
-with `/oxp import`.
+A website for planning a World of Warcraft: Forever leveling route for your character. Tell it who you play,
+tick the quests you want (or let it pick), and it builds an ordered list of steps on a zone map, tells you what
+level you'll be along the way, and exports guides for the [OpenXP](https://github.com/mjared123/OpenXP) addon.
 
-Status: the editor works for building a route in the browser and exporting it. Sharing routes online comes next.
+Status: the builder works in the browser, from character to exported guide files. Sharing routes online comes next.
 
-## Plan
+## Using the builder
 
-1. **Data export** (done): `tools/export_data.py` turns Questie's public database into JSON under `public/data`.
-2. **Route format** (done): `src/guide` reads and writes OpenXP's guide format, so routes go to the addon and back unchanged.
-3. **Editor** (done): zone map plus ordered step list, saved in the browser, with guide import and export.
-4. **Sharing**: accounts, publishing, browsing and forking routes.
+1. **Character.** Faction, race, class, starting level, normal or hardcore, and a play style (fast, balanced,
+   everything). The builder only shows quests that character can take.
+2. **Pick quests.** The board on the left lists a zone's quests chain by chain, coloured the way the game colours
+   them for your level, with XP, class quests, elite quests and gear you can use marked. **Pick quests for me**
+   ticks everything that suits your level and choices. Ticking a quest yourself also ticks what it needs first.
+3. **Build route.** The planner puts the ticked quests in order: from where you stand it always does the nearest
+   thing you are able to do, then moves single stops to shorten the walk. Chains, level requirements and the
+   20-quest log are respected, and "grind to level" steps are added where nothing else is open.
+4. **Check it.** The route panel shows your level after every step and lists what would go wrong in game: a quest
+   accepted before its chain, too low a level, a full quest log, quests never turned in, quests that are risky in
+   hardcore. Most problems have a button that fixes them.
+5. **Go on.** **Add a section** suggests the zones with the most quest XP for your level. Each section is one
+   guide; the whole route exports as guides that lead into each other.
 
-## Using the editor
+You can still work by hand: open a quest to add a single accept, objective or turn-in step; **Travel and notes**
+adds flight paths, Hearthstone binds, waypoints, notes and "grind to a level" steps; drag steps to reorder,
+double-click a step's text to edit it. Undo is Ctrl+Z, redo is Ctrl+Shift+Z, Delete removes the selected step.
 
-- Pick a zone and a faction. Quests you can still pick up show as `!` pins on the map and in the list on the left.
-- Open a quest and press **Accept**, an objective, or **Turn in**. Each one becomes a step on the right and a numbered
-  stop on the map. Accepting or turning in a second quest at the same quest giver joins the step that is already there.
-- **Travel and notes** adds flight paths, Hearthstone binds, waypoints you place on the map, and free-text notes.
-- Click a step to select it; new steps go in after it. Drag steps to reorder, double-click a step's text to edit it.
-  Undo is Ctrl+Z, redo is Ctrl+Shift+Z, Delete removes the selected step.
-- **Export** gives a share string, the guide text, or a guide file for the addon. **Import** reads any of the three.
-  Lines of an imported guide that the editor doesn't understand are kept and shown as written.
+**Export** gives a guide file for the addon, the guide text, or a share string. **Import** reads any of the three;
+a file with several guides becomes a route with several sections. Lines the builder doesn't understand are kept.
 
 The route is saved in your browser as you work.
+
+### What the numbers are
+
+WoW Forever uses Classic's XP per level and Classic's quest XP, so levels are worked out from Questie's quest
+XP plus an estimate of the mobs the objectives make you kill (counts from the quest text, drop chances where
+Questie has them). Kills inside dungeons count for about a third, as in Forever. It is an estimate: it does not
+know rested XP, groups, or how you play. Gear is marked by type (what your class can equip) because the open
+data has no item stats.
 
 ### Zone maps
 
@@ -52,9 +65,9 @@ What gets written:
 
 | File | Contents |
 | --- | --- |
-| `index.json` | Source commit, game build, and the list of zones with level range and quest counts per faction. |
-| `quests.json` | Every quest in short form (`id, name, level, minLevel, side, zone`), for search. |
-| `zones/<id>.json` | One zone: its full quests, the NPCs, objects and items they need with coordinates, and service NPCs (flight masters, innkeepers, trainers, vendors, repair, bank, stable). |
+| `index.json` | Source commit, game build, and the list of zones with level range, quest counts per faction and the map's edges in world yards. |
+| `quests.json` | Every quest in short form (`id, name, level, minLevel, side, zone, xp, preAll, preAny, classes, races`), for search and for checking chains across zones. |
+| `zones/<id>.json` | One zone: its full quests, the NPCs, objects and items they need with coordinates, service NPCs (flight masters, innkeepers, trainers, vendors, repair, bank, stable), quest rewards, drop chances, and for dungeons the gear each boss drops. |
 
 Coordinates are the 0-100 map percentages the game and OpenXP's `.goto Zone,x,y` use, keyed by zone id.
 A quest belongs to the zone Questie files it under, or to its quest giver's zone when that is a category
@@ -73,6 +86,18 @@ npm run build    # type-check and build into dist/
 
 To also test the guide reader against every guide OpenXP ships, point `OPENXP_DIR` at a checkout of the addon:
 `OPENXP_DIR=../OpenXP npm test`. Those guides aren't copied here because their license differs.
+
+## How it is put together
+
+| File | What it does |
+| --- | --- |
+| `src/xp.ts` | Levels, quest XP, kill XP, quest colours. |
+| `src/character.ts` | The character: what it can take and wear. |
+| `src/book.ts` | Quest knowledge: chains, and how much work an objective is. |
+| `src/sim.ts` | Plays a route in its head: level after each step, and the problems. |
+| `src/planner.ts` | Picks quests, orders them into steps, suggests the next zone. |
+| `src/store.ts` | The route (character plus sections), undo, saving, import and export. |
+| `src/route.ts` | Turns quests into guide steps and back. |
 
 ## Guide format
 

@@ -14,6 +14,8 @@ export interface ZoneInfo {
   levels?: [number, number];
   quests: { A: number; H: number };
   entrance?: { zone: number; x: number; y: number };
+  /** The map's edges in world yards: left, right, top, bottom. */
+  bounds?: [number, number, number, number];
 }
 
 export interface Objective {
@@ -42,6 +44,14 @@ export interface Quest {
   preAll?: number[];
   preAny?: number[];
   next?: number;
+  /** Items the quest gives or lets you choose from. */
+  rewards?: number[];
+  repeatable?: boolean;
+  raid?: boolean;
+  /** What it sends you after is elite: a job for a group. */
+  elite?: boolean;
+  /** A profession and the skill it needs. */
+  skill?: [string, number];
 }
 
 export interface Npc {
@@ -61,6 +71,13 @@ export interface Item {
   npcs?: number[];
   objects?: number[];
   vendors?: number[];
+  /** 2 weapon, 4 armour, with the game's subclass (see character.ts). */
+  cls?: number;
+  sub?: number;
+  ilvl?: number;
+  req?: number;
+  /** Drop chance in percent, by NPC id. */
+  drop?: Record<string, number>;
 }
 
 export type Service = "flight" | "inn" | "trainer" | "repair" | "vendor" | "bank" | "stable";
@@ -72,6 +89,8 @@ export interface ZoneData {
   objects: Record<string, GameObject>;
   items: Record<string, Item>;
   services: Partial<Record<Service, number[]>>;
+  /** Dungeons: who drops gear, as far as the data knows. */
+  bosses?: { npc: number; loot: number[] }[];
 }
 
 export interface DataIndex {
@@ -81,8 +100,8 @@ export interface DataIndex {
   zones: ZoneInfo[];
 }
 
-/** [id, name, level, minLevel, side, zone] */
-export type QuestRow = [number, string, number, number, Side, number];
+/** [id, name, level, minLevel, side, zone, xp, preAll, preAny, classes, races]; the last four are 0 when empty */
+export type QuestRow = [number, string, number, number, Side, number, number, number[] | 0, number[] | 0, string[] | 0, string[] | 0];
 
 const base = `${import.meta.env.BASE_URL}data/`;
 

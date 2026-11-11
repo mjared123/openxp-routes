@@ -137,7 +137,17 @@ export function questGiverStep(kind: "accept" | "turnin", quest: Quest, data: Zo
   } else if (giver) {
     lines.push(text(`Click the ${pick(giver.name)}`), action);
   } else if (items.length) {
-    lines.push(text(`Use ${loot(items[0]!.name)} to start the quest`), action);
+    // the quest starts from an item: go where it drops or lies
+    const item = items[0]!;
+    const droppers = (item.npcs ?? []).map((id) => data.npcs[id]).filter((n) => n !== undefined);
+    const holders = (item.objects ?? []).map((id) => data.objects[id]).filter((o) => o !== undefined);
+    const here = droppers.filter((d) => d.spawns[viewZone]);
+    const from = here.length ? here : droppers;
+    const names = [...new Set(from.map((d) => d.name))];
+    const source = pickPlace((from.length ? from : holders).map((e) => e.spawns), viewZone);
+    const how = from.length ? `Kill ${list(names.slice(0, 3).map(enemy))} until ${loot(item.name)} drops. Use it` : holders.length ? `Loot ${loot(item.name)} from the ${pick(holders[0]!.name)}. Use it` : `Use ${loot(item.name)}`;
+    const itemLines: StepLine[] = [...gotoLine(source, zones), text(`${how} to start the quest`), action, ...names.slice(0, 3).map((name) => writeAction({ type: "mob", name }))];
+    return { step: { lines: itemLines }, place: source };
   } else lines.push(action);
   return { step: { lines }, place };
 }

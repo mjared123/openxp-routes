@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lua_values import UNKNOWN, Parser, parse, tokenize  # noqa: E402
 
-FORMAT = 1
+FORMAT = 2
 
 # Forever's requiredRaces bits (QuestieDB src/corrections/enum/expansions.lua).
 RACES = {
@@ -69,6 +69,15 @@ SERVICES = [("flight", 8), ("inn", 128), ("trainer", 16), ("repair", 16384),
 CONTINENTS = {0: "Eastern Kingdoms", 1: "Kalimdor"}
 # An item dropped by more mobs than this only lists the ones nearest the quest.
 MAX_DROP_SOURCES = 40
+# Item classes kept with their type: 2 weapon, 4 armour.
+GEAR_CLASSES = (2, 4)
+# NPC ranks that take a group: 1 elite, 2 rare elite, 3 boss.
+ELITE_RANKS = (1, 2, 3)
+# A boss's loot list leaves out world drops (items this many mobs can drop).
+MAX_BOSS_SOURCES = 6
+SKILLS = {129: "First Aid", 164: "Blacksmithing", 165: "Leatherworking", 171: "Alchemy", 182: "Herbalism",
+          185: "Cooking", 186: "Mining", 197: "Tailoring", 202: "Engineering", 333: "Enchanting",
+          356: "Fishing", 393: "Skinning", 762: "Riding"}
 
 
 # Placeholder quests Blizzard left in the data; they can't be picked up in game.
@@ -363,7 +372,43 @@ class Exporter:
             v = ids(self.f("item", row, field))
             if v:
                 out[key] = v
+        cls = num(self.f("item", row, "class"), 0)
+        if cls in GEAR_CLASSES:  # weapons and armour: enough to say who can use it
+            out["cls"] = cls
+            out["sub"] = num(self.f("item", row, "subClass"), 0)
+            if num(self.f("item", row, "itemLevel"), 0):
+                out["ilvl"] = self.f("item", row, "itemLevel")
+            if num(self.f("item", row, "requiredLevel"), 0):
+                out["req"] = self.f("item", row, "requiredLevel")
+        chances = self.drops.get(id_)
+        if chances and out.get("npcs"):
+            known = {str(n): round(chances[n], 1) for n in out["npcs"] if n in chances}
+            if known:
+                out["drop"] = known
         return out
+
+    def rank(self, npc_id):
+        row = self.n.get(npc_id)
+        return num(self.f("npc", row, "rank"), 0) or 0 if row else 0
+
+    def needs_group(self, q):
+        """True when what the quest sends you after is elite: a job for a group."""
+        targets, any_normal = [], False
+        for o in q.get("objectives", []):
+            if o["type"] == "npc":
+                targets.append([o["id"]])
+            elif o["type"] == "killCredit":
+                targets.append(o["ids"])
+            elif o["type"] == "item":
+                row = self.i.get(o["id"])
+                drops = ids(self.f("item", row, "npcDrops")) if row else []
+                if drops and not ids(self.f("item", row, "objectDrops")) and not ids(self.f("item", row, "vendors")):
+                    targets.append(drops)
+        for group_ in targets:
+            known = [n for n in group_ if n in self.n]
+            if known and all(self.rank(n) in ELITE_RANKS for n in known):
+                return True
+        return False
 
     def zone_of_entity(self, kind, id_):
         row = (self.n if kind == "npc" else self.o).get(id_)
@@ -435,6 +480,17 @@ class Exporter:
             q["objectives"] = objectives
         if num(g("sourceItemId"), 0):
             q["givenItem"] = g("sourceItemId")
+        if self.rewards.get(id_):
+            q["rewards"] = sorted(self.rewards[id_])
+        if (num(g("specialFlags"), 0) or 0) & 1:
+            q["repeatable"] = True
+        if (num(g("questFlags"), 0) or 0) & 64:
+            q["raid"] = True
+        skill = as_list(g("requiredSkill"))
+        if len(skill) >= 2 and isinstance(skill[0], int) and skill[0] in SKILLS:
+            q["skill"] = [SKILLS[skill[0]], skill[1]]
+        if self.needs_group(q):
+            q["elite"] = True
 
         # Quest chains. preAll: every one must be done first; preAny: one is enough.
         for key, field in (("preAll", "preQuestGroup"), ("preAny", "preQuestSingle"),
@@ -543,6 +599,9 @@ def main():
     for t in conv["geometry"]["transforms"]:
         zones[t["area_id"]] = {"id": t["area_id"], "name": t["target_name"], "kind": "zone",
                                "uiMapId": t["ui_map_id"], "continent": CONTINENTS.get(t.get("map_id"))}
+        b = t.get("target_bounds")
+        if b:  # the map's edges in world yards, to measure between zones
+            zones[t["area_id"]]["bounds"] = [round(b[k]) for k in ("left", "right", "top", "bottom")]
     zdir = os.path.join(qdb, "support", "Forever", "Zones")
     ui_to_area = {int(m.group(1)): int(m.group(2)) for m in
                   re.finditer(r"\[(\d+)\] = (\d+),", read(os.path.join(zdir, "uiMapIdToAreaId.lua")))}
@@ -577,6 +636,31 @@ def main():
     ex = Exporter(db, K, zones, xp)
     ex.parent = parent
     ex.sort_names = {v: pretty(k) for k, v in sort_ids.items()}
+
+    # which quests reward an item, and how often mobs drop quest items
+    ex.rewards = {}
+    for item_id, row in db["item"].items():
+        for quest_id in ids(ex.f("item", row, "questRewards")):
+            ex.rewards.setdefault(quest_id, set()).add(item_id)
+    ex.drops = {}
+    for name in ("classicItemDrops.lua", "itemDropCorrections.lua"):
+        path = os.path.join(qdb, "support", "Forever", "DropTables", name)
+        if not os.path.exists(path):
+            continue
+        for m in re.finditer(r"^\s*\[(\d+)\] = \{[^\n]*\n((?:\s*\[\d+\] = [\d.]+,[^\n]*\n)+)", read(path), re.M):
+            chances = ex.drops.setdefault(int(m.group(1)), {})
+            for n in re.finditer(r"\[(\d+)\] = ([\d.]+)", m.group(2)):
+                chances[int(n.group(1))] = float(n.group(2))
+    report.append("rewards for %d quests, drop chances for %d items" % (len(ex.rewards), len(ex.drops)))
+
+    # gear by the mob that drops it, for dungeon boss loot
+    gear_from = {}
+    for item_id, row in db["item"].items():
+        if num(ex.f("item", row, "class"), 0) in GEAR_CLASSES:
+            sources = ids(ex.f("item", row, "npcDrops"))
+            if 0 < len(sources) <= MAX_BOSS_SOURCES:
+                for n in sources:
+                    gear_from.setdefault(n, []).append(item_id)
 
     # a zone that holds spawns is a real place even if it has no map of its own
     seen = set()
@@ -656,6 +740,25 @@ def main():
                         want_npc(n)
             if q.get("givenItem"):
                 want_item(q["givenItem"])
+            for i in q.get("rewards", []):
+                if i not in items:
+                    it = ex.item(i)
+                    if it:  # a reward: its name and type are enough
+                        items[i] = {k: v for k, v in it.items() if k in ("name", "cls", "sub", "ilvl", "req")}
+
+        bosses = []
+        if info["kind"] == "dungeon":
+            for id_, row in db["npc"].items():
+                if id_ in gear_from and ex.rank(id_) in ELITE_RANKS and (
+                        z in spawns(ex.f("npc", row, "spawns")) or ex.f("npc", row, "zoneID") == z):
+                    want_npc(id_)
+                    loot = sorted(gear_from[id_])
+                    for i in loot:
+                        if i not in items:
+                            it = ex.item(i)
+                            items[i] = {k: v for k, v in it.items() if k in ("name", "cls", "sub", "ilvl", "req")}
+                    bosses.append({"npc": id_, "loot": loot})
+            bosses.sort(key=lambda b: (max(npcs[b["npc"]].get("level", [0])), b["npc"]))
 
         services = {}
         for id_, row in db["npc"].items():
@@ -677,11 +780,13 @@ def main():
             "zone": info,
             "quests": sorted(qs, key=lambda q: (q["level"], q["minLevel"], q["id"])),
             "npcs": npcs, "objects": objects, "items": items, "services": services,
+            **({"bosses": bosses} if bosses else {}),
         })
 
     total += write_json(os.path.join(out, "quests.json"), {
-        "fields": ["id", "name", "level", "minLevel", "side", "zone"],
-        "quests": [[q["id"], q["name"], q["level"], q["minLevel"], q["side"], q["zone"]]
+        "fields": ["id", "name", "level", "minLevel", "side", "zone", "xp", "preAll", "preAny", "classes", "races"],
+        "quests": [[q["id"], q["name"], q["level"], q["minLevel"], q["side"], q["zone"], q.get("xp", 0),
+                    q.get("preAll", 0), q.get("preAny", 0), q.get("classes", 0), q.get("races", 0)]
                    for q in quests.values()],
     })
     try:
