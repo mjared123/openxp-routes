@@ -9,7 +9,7 @@ Status: early. The quest data export is in place; the editor comes next.
 ## Plan
 
 1. **Data export** (done): `tools/export_data.py` turns Questie's public database into JSON under `public/data`.
-2. **Route format**: read and write OpenXP's guide format, so routes go to the addon and back unchanged.
+2. **Route format** (done): `src/guide` reads and writes OpenXP's guide format, so routes go to the addon and back unchanged.
 3. **Editor**: zone map plus ordered step list, saved in the browser, with guide import and export.
 4. **Sharing**: accounts, publishing, browsing and forking routes.
 
@@ -42,6 +42,27 @@ A quest belongs to the zone Questie files it under, or to its quest giver's zone
 such as a class or profession.
 
 Tests: `python3 -m unittest discover -s tools/tests`.
+
+## Develop
+
+```sh
+npm install
+npm run dev      # the site, at http://localhost:5173
+npm test         # unit tests
+npm run build    # type-check and build into dist/
+```
+
+To also test the guide reader against every guide OpenXP ships, point `OPENXP_DIR` at a checkout of the addon:
+`OPENXP_DIR=../OpenXP npm test`. Those guides aren't copied here because their license differs.
+
+## Guide format
+
+`src/guide` turns a guide into data and back (`parseGuide`, `serializeGuide`). It keeps every line, including
+commands the editor doesn't know, so reading and writing a guide changes nothing but whitespace.
+`readAction` and `writeAction` cover the commands the editor creates: `.goto`, `.accept`, `.turnin`,
+`.complete`, `.fp`, `.fly`, `.home`, `.hs`, `.xp`, `.target` and `.mob`.
+
+Routes are shared as a single line of text; see [docs/share-string.md](docs/share-string.md).
 
 ## License
 
