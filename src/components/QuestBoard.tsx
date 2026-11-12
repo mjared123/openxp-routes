@@ -238,6 +238,18 @@ export function QuestBoard(p: Props) {
               </p>
             )}
             {quest.next && p.book.meta(quest.next) && <p className="meta">Leads to {p.book.name(quest.next)}</p>}
+            {(quest.notes || quest.timed || quest.escort) && (
+              <ul className="quest-notes">
+                {quest.timed && <li className="tag">Timed</li>}
+                {quest.escort && <li className="tag">Escort</li>}
+                {quest.notes?.map((note) => <li key={note}>{note}</li>)}
+                {quest.notes && (
+                  <li className="credit">
+                    Notes from <a href="https://github.com/fitzforge/polestar/tree/main/forever-db" target="_blank" rel="noreferrer">Polestar's forever-db</a>, CC BY 4.0
+                  </li>
+                )}
+              </ul>
+            )}
             {skip && skip !== "side" && <p className="meta why">"Pick quests for me" leaves this out: {WHY[skip]}.</p>}
             {quest.rewards && (
               <>

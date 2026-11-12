@@ -53,6 +53,12 @@ export interface Quest {
   elite?: boolean;
   /** A profession and the skill it needs. */
   skill?: [string, number];
+  /** Has a timer once accepted. */
+  timed?: boolean;
+  /** You walk someone to safety. */
+  escort?: boolean;
+  /** Things worth knowing before you start, from Polestar's forever-db (CC BY 4.0). */
+  notes?: string[];
 }
 
 export interface Npc {

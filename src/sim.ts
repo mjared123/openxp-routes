@@ -101,6 +101,7 @@ export function simulate(sections: Step[][], c: Character, book: Book, from?: Si
               add("warn", `${name} is level ${meta.level}, ${meta.level - whole} levels above you here${c.hardcore ? ": dangerous in hardcore" : ""}.`, a.questId);
             }
           }
+          if (meta && c.hardcore && (meta.escort || meta.timed)) add("warn", `${name} is ${meta.escort ? "an escort" : "a timed"} quest: take care in hardcore.`, a.questId);
           if (state.accepted.size > QUEST_LOG_LIMIT) add("error", `The quest log is full here (${state.accepted.size} of ${QUEST_LOG_LIMIT}).`);
         } else if (a.type === "turnin") {
           const meta = book.meta(a.questId);

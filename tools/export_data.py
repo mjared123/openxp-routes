@@ -34,7 +34,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lua_values import UNKNOWN, Parser, parse, tokenize  # noqa: E402
 
-FORMAT = 3
+FORMAT = 4
 
 # Forever's requiredRaces bits (QuestieDB src/corrections/enum/expansions.lua).
 RACES = {
@@ -88,7 +88,7 @@ SKILLS = {129: "First Aid", 164: "Blacksmithing", 165: "Leatherworking", 171: "A
 
 
 # Placeholder quests Blizzard left in the data; they can't be picked up in game.
-JUNK = re.compile(r"^<|\bREUSE\b|\bUNUSED\b|\bDEPRECATED\b|^\[PH\]|^zzOLD|\bTEST\b", re.I)
+JUNK = re.compile(r"^<|\bREUSE\b|\breuse\b|\bUNUSED\b|\bDEPRECATED\b|^\[PH\]|^zzOLD|\bTEST\b|\b[Tt]est [Qq]uest")
 
 
 def read(path):
@@ -333,6 +333,36 @@ def names_of(mask, table, everything):
     return [name for bit, name in table if mask & bit] or None
 
 
+def load_forever_db(path):
+    """
+    Polestar's forever-db (github.com/fitzforge/polestar, folder forever-db), a second
+    open source laid over Questie's data where Questie has nothing:
+    quest XP, group / timed / escort quests, drop chances and written warnings.
+    Its tables are GPL-3.0; the warnings (data/step.jsonl) are CC BY 4.0.
+    """
+    def rows(table):
+        with open(os.path.join(path, "data", table + ".jsonl"), encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    out = {"xp": {}, "group": set(), "timed": set(), "escort": set(), "notes": {}, "drops": {}}
+    for q in rows("quest"):
+        if q.get("xp"):
+            out["xp"][q["id"]] = q["xp"]
+    kinds = {"group/elite": "group", "timed": "timed", "escort": "escort"}
+    for m in rows("mechanic"):
+        if m.get("kind") in kinds:
+            out[kinds[m["kind"]]].add(m["quest"])
+    for st in sorted(rows("step"), key=lambda r: (r["quest"], r.get("n", 0))):
+        if st.get("action") == "gotcha" and st.get("text") and st.get("confidence") != "unconfirmed":
+            out["notes"].setdefault(st["quest"], []).append(st["text"])
+    for src in rows("item_source"):
+        if src.get("kind") == "npc" and "chance" in src:
+            out["drops"].setdefault(src["item"], {})[src["id"]] = src["chance"]
+    with open(os.path.join(path, "index.json"), encoding="utf-8") as f:
+        out["version"] = json.load(f).get("version", "")
+    return out
+
+
 class Exporter:
     def __init__(self, db, K, zones, xp):
         self.q, self.n, self.o, self.i = db["quest"], db["npc"], db["object"], db["item"]
@@ -340,6 +370,7 @@ class Exporter:
         self.zones = zones  # {id: {"name":..., ...}}
         self.xp = xp
         self.parent = {}
+        self.extra = None  # load_forever_db(), when given
 
     def f(self, kind, row, name):
         pos = self.K[kind][name]
@@ -498,6 +529,14 @@ class Exporter:
             q["skill"] = [SKILLS[skill[0]], skill[1]]
         if self.needs_group(q):
             q["elite"] = True
+        if self.extra:
+            if id_ in self.extra["group"]:
+                q["elite"] = True
+            for flag in ("timed", "escort"):
+                if id_ in self.extra[flag]:
+                    q[flag] = True
+            if id_ in self.extra["notes"]:
+                q["notes"] = self.extra["notes"][id_]
 
         # Quest chains. preAll: every one must be done first; preAny: one is enough.
         for key, field in (("preAll", "preQuestGroup"), ("preAny", "preQuestSingle"),
@@ -546,6 +585,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--questiedb", required=True, help="path to a checkout of github.com/Questie/QuestieDB")
     ap.add_argument("--dump", help="OpenXP.lua saved variables holding a /oxp questdump (optional)")
+    ap.add_argument("--foreverdb", help="Polestar's forever-db folder, to fill what Questie lacks (optional)")
     ap.add_argument("--out", default="public/data", help="output folder (default: public/data)")
     args = ap.parse_args()
     qdb = args.questiedb
@@ -640,8 +680,18 @@ def main():
         if on and on != area and area not in zones_with_maps(zones) and area not in parent:
             parent[area] = on
 
+    extra = load_forever_db(args.foreverdb) if args.foreverdb else None
+    if extra:
+        filled = [q for q in extra["xp"] if q in db["quest"] and q not in xp]
+        for q in filled:
+            xp[q] = extra["xp"][q]
+        report.append("forever-db %s: XP for %d more quests, %d group, %d timed, %d escort quests, notes on %d"
+                      % (extra["version"], len(filled), len(extra["group"]), len(extra["timed"]),
+                         len(extra["escort"]), len(extra["notes"])))
+
     ex = Exporter(db, K, zones, xp)
     ex.parent = parent
+    ex.extra = extra
     ex.sort_names = {v: pretty(k) for k, v in sort_ids.items()}
 
     # which quests reward an item, and how often mobs drop quest items
@@ -658,6 +708,15 @@ def main():
             chances = ex.drops.setdefault(int(m.group(1)), {})
             for n in re.finditer(r"\[(\d+)\] = ([\d.]+)", m.group(2)):
                 chances[int(n.group(1))] = float(n.group(2))
+    if extra:  # drop chances Questie has none for
+        added = 0
+        for item_id, chances in extra["drops"].items():
+            mine = ex.drops.setdefault(item_id, {})
+            for n, chance in chances.items():
+                if n not in mine:
+                    mine[n] = chance
+                    added += 1
+        report.append("forever-db: %d more drop chances" % added)
     report.append("rewards for %d quests, drop chances for %d items" % (len(ex.rewards), len(ex.drops)))
 
     # gear by the mob that drops it, for dungeon boss loot
@@ -793,12 +852,13 @@ def main():
     total += write_json(os.path.join(out, "quests.json"), {
         "fields": ["id", "name", "level", "minLevel", "side", "zone", "xp", "preAll", "preAny", "classes", "races",
                    "category", "profession", "flags"],
-        # flags: 1 elite, 2 repeatable, 4 raid, 8 starts from an item
+        # flags: 1 elite, 2 repeatable, 4 raid, 8 starts from an item, 16 timed, 32 escort
         "quests": [[q["id"], q["name"], q["level"], q["minLevel"], q["side"], q["zone"], q.get("xp", 0),
                     q.get("preAll", 0), q.get("preAny", 0), q.get("classes", 0), q.get("races", 0),
                     q.get("category", 0), q["skill"][0] if q.get("skill") else 0,
                     (1 if q.get("elite") else 0) | (2 if q.get("repeatable") else 0) | (4 if q.get("raid") else 0)
-                    | (8 if not q.get("start", {}).get("npcs") and not q.get("start", {}).get("objects") else 0)]
+                    | (8 if not q.get("start", {}).get("npcs") and not q.get("start", {}).get("objects") else 0)
+                    | (16 if q.get("timed") else 0) | (32 if q.get("escort") else 0)]
                    for q in quests.values()],
     })
     # goals.json: things a player can ask a route to include

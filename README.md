@@ -65,6 +65,19 @@ It needs Python 3.9 or newer and nothing else. The script reads Questie's Lua fi
 them. It applies Questie's Forever layers in Questie's own order: raw rows, inherited Classic corrections,
 the generated Forever base (which holds Forever's new quests), traces, then hand-written Forever corrections.
 
+### A second source: Polestar's forever-db
+
+```sh
+git clone --depth 1 https://github.com/fitzforge/polestar ../polestar
+python3 tools/export_data.py --questiedb ../QuestieDB --foreverdb ../polestar/forever-db
+```
+
+`--foreverdb` lays [forever-db](https://github.com/fitzforge/polestar/tree/main/forever-db) over Questie's data
+where Questie has nothing. Questie stays the base and wins wherever both know a value. It adds quest XP that
+Questie lacks, marks quests that need a group, have a timer or are an escort, adds drop chances, and gives the
+quest board its warnings ("the bauble disappears 5 minutes after you loot it"). The data in `public/data` is
+built with it.
+
 Add `--dump path/to/OpenXP.lua` to put what your installed Questie knows in game on top. Make that file with
 `/oxp questdump` in OpenXP, then `/reload`; it is saved in `WTF/Account/<name>/SavedVariables/OpenXP.lua`.
 
@@ -136,7 +149,11 @@ Routes are shared as a single line of text; see [docs/share-string.md](docs/shar
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE). The quest data comes from [QuestieDB](https://github.com/Questie/QuestieDB),
-which is GPLv3; that is why this project is too. Item tooltips come from
+which is GPLv3; that is why this project is too. Group, timer and escort flags, some quest XP and drop chances
+come from Polestar's [forever-db](https://github.com/fitzforge/polestar/tree/main/forever-db) (GPL-3.0; its own
+NOTICE credits EG Link, CMaNGOS, VMaNGOS, ForeverTDB, Questie and pfQuest). The quest warnings are forever-db's
+notes, © the Polestar contributors, used unchanged under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Item tooltips come from
 [wow-classic-items](https://github.com/Nakroma/wow-classic-items) (MIT). World of Warcraft, its item icons and
 its art are Blizzard Entertainment's.
 This is a fan project, not affiliated with Blizzard, Questie or RestedXP.

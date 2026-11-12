@@ -252,7 +252,7 @@ export function Journey({ project, sim, index, goalData, onOpen, onExport, onNew
             })}
           </ol>
         </section>
-        <p className="adv-note center">Levels are estimates from quest XP and the mobs your objectives make you kill. Quest data from Questie.</p>
+        <p className="adv-note center">Levels are estimates from quest XP and the mobs your objectives make you kill. Quest data from Questie and Polestar's forever-db.</p>
       </main>
     </div>
   );

@@ -305,7 +305,7 @@ export async function generateRoute(
     else missed.push(`${zoneNames.get(z)}: it is for characters above level ${goals.target}.`);
   }
   // --- tidy up: nothing on the route that the character can't do when they get there -----
-  for (let pass = 0; pass < 12; pass++) {
+  for (let pass = 0; pass < 40; pass++) {
     const sim = simulate(chapters.map((ch) => ch.steps), c, book);
     const bad = new Set(sim.problems.filter((p) => p.severity === "error" && p.questId).map((p) => p.questId!));
     if (!bad.size) {
